@@ -1,0 +1,72 @@
+version: "3.8"
+
+# ============================================================
+# SIMON DM - Laravel 11 + MySQL 8
+# Port App  : 8090  (host) -> 80 (container)
+# Port MySQL : 33070 (host) -> 3306 (container)
+# Kompatibel dengan Podman + podman-compose
+# ============================================================
+
+networks:
+  simon-net:
+    driver: bridge
+
+volumes:
+  mysql-data:
+    driver: local
+  storage-data:
+    driver: local
+
+services:
+
+  # ----------------------------------------------------------
+  # Database MySQL 8
+  # ----------------------------------------------------------
+  db:
+    image: mysql:8.0
+    container_name: simon-dm-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_secret
+      MYSQL_DATABASE: simon_dm
+      MYSQL_USER: simon_user
+      MYSQL_PASSWORD: simon_secret
+    ports:
+      - "33070:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - simon-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_secret"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ----------------------------------------------------------
+  # Aplikasi Laravel (Nginx + PHP-FPM + Queue)
+  # ----------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: simon-dm-app:latest
+    container_name: simon-dm-app
+    restart: unless-stopped
+    env_file:
+      - .env.podman
+    environment:
+      # Override DB_HOST agar mengarah ke service db
+      DB_HOST: db
+    ports:
+      - "8090:80"
+    volumes:
+      - storage-data:/var/www/html/storage/app
+      - ./storage/logs:/var/www/html/storage/logs
+    networks:
+      - simon-net
+    depends_on:
+      db:
+        condition: service_healthy
